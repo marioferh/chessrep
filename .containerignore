@@ -1,0 +1,8 @@
+.git/
+__pycache__/
+*.pyc
+scid-import/
+data/
+repertoire/
+training/
+.venv/

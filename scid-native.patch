@@ -1,0 +1,16 @@
+--- a/src/tkscid.cpp
++++ b/src/tkscid.cpp
+@@ -15238,3 +15238,4 @@
+     // 4. Search through each game
+     for (uint i=0; i < base->numGames; i++) {
++        if (base->filter->Get(i) == 0) { skipcount++; continue; }
+	    if (showProgress) {
+@@ -15568,4 +15568,8 @@
+         if (listMode) {
++            sprintf (temp, "\t%s\t%u\t%u\t%u\t%u\t%u", node->san, node->total,
++                     node->freq[RESULT_White], node->freq[RESULT_Draw],
++                     node->freq[RESULT_Black], node->freq[RESULT_None]);
++            output->Append (temp);
+             Tcl_AppendElement (ti, (char *) output->Data());
+             output->Clear();
+         }
