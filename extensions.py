@@ -3,7 +3,7 @@ from datetime import date, timedelta, datetime
 import json, uuid, shutil, os
 import base64
 import chess, chess.pgn, chess.engine
-from flask import request, jsonify
+from flask import request, jsonify, Response, stream_with_context
 from scid_backend import find_bases, position_stats as scid_position_stats, list_games as scid_list_games
 
 def register(app, root, pgn_dir, rep_file):
@@ -170,6 +170,27 @@ def register(app, root, pgn_dir, rep_file):
         x={'id':uuid.uuid4().hex,'variant_id':variant_id,'line_name':(d.get('line_name') or '').strip(),'order':int(d.get('order') or 0),'color':d.get('color','Negras'),'name':d.get('name','Sin nombre'),'note':d.get('note',''),'fen':b.fen(),'expected_san':san,'due':date.today().isoformat(),'interval':0,'ease':2.5,'reps':0,'lapses':0,'correct_count':0,'incorrect_count':0,'review_count':0,'last_review':None,'last_grade':None}
         a=reps(); a.append(x); save(a); return jsonify({'item':x,'count':len(a)}),201
 
+    @app.post('/api/repertoire/line')
+    def rep_add_line():
+        d=request.get_json(force=True); variant_id=d.get('variant_id'); line_name=(d.get('line_name') or 'Línea Stockfish').strip()
+        moves=d.get('moves',[]); color=d.get('color','Negras')
+        variant=next((v for v in variants() if v['id']==variant_id),None)
+        if not variant: return jsonify({'error':'Selecciona un árbol de variantes válido.'}),404
+        if color not in ('Blancas','Negras'): return jsonify({'error':'El color debe ser Blancas o Negras.'}),400
+        if not isinstance(moves,list) or not moves or len(moves)>24: return jsonify({'error':'La variante debe contener entre 1 y 24 jugadas.'}),400
+        try:
+            board=chess.Board(d.get('fen','')); side=chess.WHITE if color=='Blancas' else chess.BLACK
+            existing=reps(); added=[]
+            for index,raw_san in enumerate(moves):
+                move=board.parse_san(str(raw_san)); san=board.san(move)
+                if board.turn==side:
+                    added.append({'id':uuid.uuid4().hex,'variant_id':variant_id,'line_name':line_name,'order':index,'color':color,'name':line_name,'note':'Variante guardada desde el análisis de Stockfish.','fen':board.fen(),'expected_san':san,'due':date.today().isoformat(),'interval':0,'ease':2.5,'reps':0,'lapses':0,'correct_count':0,'incorrect_count':0,'review_count':0,'last_review':None,'last_grade':None})
+                board.push(move)
+            if not added: return jsonify({'error':f'La línea no contiene jugadas para el repertorio de {color.lower()}.'}),400
+            existing.extend(added); save(existing)
+            return jsonify({'saved':len(added),'variant':variant['name'],'line_name':line_name,'items':added}),201
+        except Exception as e: return jsonify({'error':str(e)}),400
+
     @app.patch('/api/repertoire/<item_id>')
     def rep_update(item_id):
         d=request.get_json(force=True); a=reps(); x=next((z for z in a if z['id']==item_id),None)
@@ -263,4 +284,46 @@ def register(app, root, pgn_dir, rep_file):
                 score=info['score'].pov(chess.WHITE)
                 out.append({'cp':score.score(mate_score=100000),'mate':score.mate(),'moves':sans})
             return jsonify({'depth':depth,'lines':out,'engine':'Stockfish'})
+        except Exception as e: return jsonify({'error':str(e)}),400
+
+    @app.post('/api/engine/stream')
+    def engine_stream():
+        try:
+            d=request.get_json(force=True); b=chess.Board(d.get('fen','')); p=stockfish_path()
+            if not p or not Path(p).is_file() or not os.access(p, os.X_OK):
+                return jsonify({'error':'No se encuentra Stockfish dentro del contenedor. Reconstruye la imagen con ./podman-run.sh.'}),503
+            depth=max(8,min(30,int(d.get('depth',12))))
+        except Exception as e:
+            return jsonify({'error':str(e)}),400
+
+        def events():
+            try:
+                with chess.engine.SimpleEngine.popen_uci(p) as engine:
+                    engine.configure({'Threads': max(1, min(4, os.cpu_count() or 1)), 'Hash': 256})
+                    lines={}
+                    with engine.analysis(b,chess.engine.Limit(depth=depth),multipv=3) as analysis:
+                        for info in analysis:
+                            index=info.get('multipv',1)-1
+                            board=b.copy(); sans=[]
+                            for move in info.get('pv',[])[:12]:
+                                sans.append(board.san(move)); board.push(move)
+                            if not sans or 'score' not in info: continue
+                            score=info['score'].pov(chess.WHITE)
+                            lines[index]={'cp':score.score(mate_score=100000),'mate':score.mate(),'moves':sans}
+                            yield 'data: '+json.dumps({'type':'progress','depth':info.get('depth',0),'seldepth':info.get('seldepth',0),'nodes':info.get('nodes',0),'nps':info.get('nps',0),'lines':[lines[i] for i in sorted(lines)]})+'\n\n'
+                yield 'data: '+json.dumps({'type':'done','depth':depth})+'\n\n'
+            except Exception as e:
+                yield 'data: '+json.dumps({'type':'error','error':str(e)})+'\n\n'
+        return Response(stream_with_context(events()),mimetype='text/event-stream',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
+
+    @app.post('/api/engine/line')
+    def engine_line():
+        try:
+            d=request.get_json(force=True); board=chess.Board(d.get('fen','')); positions=[{'fen':board.fen(),'san':''}]
+            moves=d.get('moves',[])
+            if not isinstance(moves,list) or len(moves)>24: raise ValueError('La variante no es válida.')
+            for san in moves:
+                move=board.parse_san(str(san)); san=board.san(move); board.push(move)
+                positions.append({'fen':board.fen(),'san':san})
+            return jsonify({'positions':positions})
         except Exception as e: return jsonify({'error':str(e)}),400
