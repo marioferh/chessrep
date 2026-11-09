@@ -15,3 +15,13 @@ __pycache__/
 *.log
 *.pid
 .DS_Store
+
+# User chess data, regardless of folder
+*.pgn
+*.si4
+*.sg4
+*.sn4
+*.stc
+*.sqlite
+*.sqlite3
+*.db
