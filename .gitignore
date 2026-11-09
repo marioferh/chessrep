@@ -1,0 +1,17 @@
+# Local databases and user data
+scid-import/
+data/
+repertoire/
+training/
+
+# Local environment and runtime files
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.log
+*.pid
+.DS_Store
