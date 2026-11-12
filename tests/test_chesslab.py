@@ -138,8 +138,11 @@ class ChessLabAPITests(unittest.TestCase):
     def test_ui_contains_core_modules_and_repertoire_controls(self):
         html = (self.root / 'templates' / 'index.html').read_text(encoding='utf-8')
         for marker in ('data-tab=\"library\"', 'data-tab=\"repertoire\"', 'data-tab=\"analysis\"',
-                       'starttraining', 'repmetrics', 'variantlist', 'Base SCID nativa', 'otbanalyze'):
+                       'starttraining', 'repmetrics', 'variantlist', 'Base SCID', 'otbanalyze',
+                       'engine-save-line', 'Mis líneas de repertorio'):
             self.assertIn(marker, html)
+        self.assertNotIn('createvariant', html)
+        self.assertNotIn('Añadir posición a una línea', html)
 
     def test_stockfish_can_analyze_a_position_when_required(self):
         if os.environ.get('CHESSLAB_REQUIRE_STOCKFISH') != '1':
